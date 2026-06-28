@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GMB Lead Finder</title>
+<style>
+  :root{
+    --bg:#0f172a; --panel:#1e293b; --panel2:#273449; --line:#334155;
+    --text:#e2e8f0; --muted:#94a3b8; --accent:#6366f1; --accent2:#4f46e5;
+    --hot:#ef4444; --warm:#f59e0b; --good:#22c55e;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--text)}
+  header{padding:18px 24px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px}
+  header h1{font-size:18px;margin:0}
+  header .tag{font-size:12px;color:var(--muted)}
+  .wrap{display:grid;grid-template-columns:320px 1fr;gap:0;min-height:calc(100vh - 61px)}
+  .sidebar{background:var(--panel);border-right:1px solid var(--line);padding:18px;overflow:auto}
+  .main{padding:18px 24px;overflow:auto}
+  label{display:block;font-size:13px;color:var(--muted);margin:14px 0 6px}
+  textarea,input,select{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);
+    border-radius:8px;padding:9px 10px;font-size:13px;font-family:inherit}
+  textarea{resize:vertical;min-height:80px}
+  .row{display:flex;gap:10px}
+  .row>div{flex:1}
+  .check{display:flex;align-items:center;gap:8px;margin-top:12px;font-size:13px;color:var(--text)}
+  .check input{width:auto}
+  button{cursor:pointer;border:none;border-radius:8px;font-size:14px;font-weight:600;padding:11px 14px}
+  .btn-primary{background:var(--accent);color:#fff;width:100%;margin-top:18px}
+  .btn-primary:hover{background:var(--accent2)}
+  .btn-primary:disabled{opacity:.5;cursor:not-allowed}
+  .btn-ghost{background:var(--panel2);color:var(--text);border:1px solid var(--line)}
+  .warnkey{background:#7f1d1d;color:#fecaca;padding:8px 10px;border-radius:8px;font-size:12px;margin-bottom:8px}
+  .toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:14px}
+  .toolbar .spacer{flex:1}
+  .stat{font-size:13px;color:var(--muted)}
+  .stat b{color:var(--text)}
+  .progress{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:14px;display:none}
+  .bar{height:8px;background:var(--panel2);border-radius:6px;overflow:hidden;margin-top:8px}
+  .bar>span{display:block;height:100%;width:0;background:var(--accent);transition:width .2s}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{padding:9px 10px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
+  th{position:sticky;top:0;background:var(--panel);color:var(--muted);font-weight:600;cursor:pointer;white-space:nowrap}
+  tr:hover td{background:#1b2740}
+  .pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+  .p-hot{background:rgba(239,68,68,.18);color:#fca5a5}
+  .p-warm{background:rgba(245,158,11,.18);color:#fcd34d}
+  .p-good{background:rgba(34,197,94,.16);color:#86efac}
+  .score{font-weight:700}
+  .nowrap{white-space:nowrap}
+  a{color:#93c5fd}
+  .empty{color:var(--muted);text-align:center;padding:60px 0}
+  .perf-bad{color:#fca5a5;font-weight:700}
+  .perf-mid{color:#fcd34d;font-weight:700}
+  .perf-ok{color:#86efac;font-weight:700}
+</style>
+</head>
+<body>
+<header>
+  <h1>🔎 GMB Lead Finder</h1>
+  <span class="tag">Find local businesses with bad / missing websites</span>
+</header>
+
+<div class="wrap">
+  <!-- SIDEBAR -->
+  <div class="sidebar">
+    {% if not has_key %}
+    <div class="warnkey">⚠ No API key found. Create a <b>.env</b> file with GOOGLE_API_KEY, then restart.</div>
+    {% endif %}
+
+    <label>Niches (one per line)</label>
+    <textarea id="niches" placeholder="dentist&#10;plumber&#10;roofing contractor">dentist
+plumber
+roofing contractor</textarea>
+
+    <label>Cities (one per line)</label>
+    <textarea id="cities" placeholder="Houston TX&#10;Austin TX">Houston TX
+Austin TX</textarea>
+
+    <div class="row">
+      <div>
+        <label>Max per query</label>
+        <select id="maxper">
+          <option value="20">20</option>
+          <option value="40">40</option>
+          <option value="60" selected>60</option>
+        </select>
+      </div>
+    </div>
+
+    <label>Business size — review count (SME proxy)</label>
+    <div class="row">
+      <div><input id="minrev" type="number" min="0" value="25" placeholder="min"></div>
+      <div><input id="maxrev" type="number" min="0" value="400" placeholder="max"></div>
+    </div>
+    <p class="stat" style="margin:6px 0 0">Filters out 1-person shops &amp; big chains. 0 = no limit.</p>
+
+    <label class="check"><input type="checkbox" id="pagespeed" checked> Run PageSpeed scoring</label>
+    <label class="check"><input type="checkbox" id="hideseen"> Hide businesses I've already pulled</label>
+    <label class="check"><input type="checkbox" id="findemails" checked> Find contact emails from websites</label>
+    <label class="check"><input type="checkbox" id="keepgood"> Also keep 🟢 Good websites (normally skipped)</label>
+
+    <!-- Apollo enrichment -->
+    <div style="border-top:1px solid var(--line);margin-top:16px;padding-top:12px">
+      {% if has_apollo %}
+      <label class="check"><input type="checkbox" id="apollo"> 🏢 Enrich employees &amp; revenue (Apollo)</label>
+      <div id="apolloOpts" style="display:none">
+        <label>Employees (min / max)</label>
+        <div class="row">
+          <div><input id="empmin" type="number" min="0" value="10"></div>
+          <div><input id="empmax" type="number" min="0" value="20"></div>
+        </div>
+        <label>Annual revenue $M (min / max)</label>
+        <div class="row">
+          <div><input id="revmin" type="number" step="0.1" min="0" value="0.1"></div>
+          <div><input id="revmax" type="number" step="0.1" min="0" value="0.5"></div>
+        </div>
+        <label class="check"><input type="checkbox" id="apollostrict"> Strict: drop leads Apollo has no size data for</label>
+      </div>
+      {% else %}
+      <p class="stat">🏢 <b>Apollo enrichment</b> (employees/revenue) is off.
+         Add <code>APOLLO_API_KEY</code> to your <b>.env</b> and restart to enable it.</p>
+      {% endif %}
+    </div>
+
+    <button class="btn-primary" id="runBtn">▶ Run Search</button>
+    <p class="stat" style="margin-top:14px">Tip: 1 niche × 1 city ≈ up to 60 leads.
+       PageSpeed scoring takes ~1–2 min for 60 sites.</p>
+  </div>
+
+  <!-- MAIN -->
+  <div class="main">
+    <div class="progress" id="progress">
+      <div id="progressText">Starting…</div>
+      <div class="bar"><span id="progressBar"></span></div>
+    </div>
+
+    <div class="toolbar">
+      <select id="filterQuality" class="btn-ghost" style="padding:8px">
+        <option value="">All workable (🔥 Hot + 🟠 Warm)</option>
+        <option value="hot">🔥 Hot only</option>
+        <option value="intent">🚧 Buying-intent signals only</option>
+        <option value="fb">📘 Active on Facebook only</option>
+        <option value="nosite">No website only</option>
+      </select>
+      <input id="searchBox" placeholder="Filter by name / city…" style="max-width:240px">
+      <span class="spacer"></span>
+      <span class="stat" id="count">No results yet</span>
+      <button class="btn-ghost" id="exportBtn">⬇ Export CSV</button>
+    </div>
+
+    <table id="tbl">
+      <thead>
+        <tr>
+          <th data-k="lead_score">Score</th>
+          <th data-k="lead_quality">Quality</th>
+          <th data-k="name">Business</th>
+          <th data-k="intent">Buying Intent</th>
+          <th data-k="website_status">Website Status</th>
+          <th data-k="perf">Speed</th>
+          <th data-k="seo">SEO</th>
+          <th data-k="phone">Phone</th>
+          <th data-k="email">Email</th>
+          <th>Social</th>
+          <th data-k="website">Website</th>
+          <th data-k="employees">Staff</th>
+          <th data-k="revenue">Revenue</th>
+          <th data-k="rating">Rating</th>
+          <th data-k="city">City</th>
+          <th>Maps</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+    <div class="empty" id="empty">Enter niches &amp; cities, then click <b>Run Search</b>.</div>
+  </div>
+</div>
+
+<script>
+let LEADS = [];
+let sortKey = "lead_score", sortDir = -1;
+
+const $ = id => document.getElementById(id);
+
+function perfCell(v){
+  if(v===null||v===undefined||v==="") return '<span class="stat">—</span>';
+  const cls = v<50?"perf-bad":(v<75?"perf-mid":"perf-ok");
+  return `<span class="${cls}">${v}</span>`;
+}
+function qualityPill(q){
+  if(q.includes("Hot")) return `<span class="pill p-hot">${q}</span>`;
+  if(q.includes("Warm")) return `<span class="pill p-warm">${q}</span>`;
+  return `<span class="pill p-good">${q}</span>`;
+}
+
+function applyFilters(){
+  const fq = $("filterQuality").value;
+  const term = $("searchBox").value.toLowerCase();
+  let rows = LEADS.slice();
+  if(fq==="hot") rows = rows.filter(l=>l.lead_quality.includes("Hot"));
+  else if(fq==="warm") rows = rows.filter(l=>l.lead_quality.includes("Hot")||l.lead_quality.includes("Warm"));
+  else if(fq==="intent") rows = rows.filter(l=>l.intent);
+  else if(fq==="fb") rows = rows.filter(l=>l.facebook);
+  else if(fq==="nosite") rows = rows.filter(l=>!l.website);
+  if(term) rows = rows.filter(l=>(l.name+" "+l.city+" "+l.niche).toLowerCase().includes(term));
+
+  rows.sort((a,b)=>{
+    let x=a[sortKey], y=b[sortKey];
+    if(x===null||x===undefined||x==="") x = -Infinity;
+    if(y===null||y===undefined||y==="") y = -Infinity;
+    if(typeof x==="string"){return sortDir*x.localeCompare(y);}
+    return sortDir*(x-y);
+  });
+  render(rows);
+}
+
+function render(rows){
+  const tb = $("tbody");
+  $("empty").style.display = rows.length?"none":"block";
+  $("count").textContent = `${rows.length} shown · ${LEADS.length} total · `
+    + `${LEADS.filter(l=>l.lead_quality.includes("Hot")).length} hot`;
+  tb.innerHTML = rows.map(l=>`
+    <tr>
+      <td class="score">${l.lead_score}</td>
+      <td>${qualityPill(l.lead_quality)}</td>
+      <td><b>${esc(l.name)}</b><div class="stat">${esc(l.niche)}</div></td>
+      <td class="nowrap">${l.intent?`<b>${esc(l.intent)}</b>`:'<span class="stat">—</span>'}</td>
+      <td class="nowrap">${esc(l.website_status)}${l.flags && l.flags!=="—"?`<div class="stat">${esc(l.flags)}</div>`:""}</td>
+      <td>${perfCell(l.perf)}</td>
+      <td>${perfCell(l.seo)}</td>
+      <td class="nowrap">${esc(l.phone||"—")}</td>
+      <td>${l.email?`<a href="mailto:${esc(l.email)}">${esc(l.email)}</a>`:'<span class="stat">—</span>'}</td>
+      <td class="nowrap">${l.facebook?`<a href="${esc(l.facebook)}" target="_blank" title="${esc(l.facebook)}">📘 FB</a>`:""}${l.facebook&&l.instagram?" ":""}${l.instagram?`<a href="${esc(l.instagram)}" target="_blank" title="${esc(l.instagram)}">📷 IG</a>`:""}${!l.facebook&&!l.instagram?'<span class="stat">—</span>':""}</td>
+      <td>${l.website?`<a href="${esc(l.website)}" target="_blank">site ↗</a>`:'<span class="stat">none</span>'}</td>
+      <td class="nowrap">${l.employees!==""&&l.employees!=null?esc(l.employees):'<span class="stat">—</span>'}</td>
+      <td class="nowrap">${l.revenue_str?esc(l.revenue_str):'<span class="stat">—</span>'}</td>
+      <td class="nowrap">${l.rating?l.rating+" ("+l.reviews+")":"—"}</td>
+      <td class="nowrap">${esc(l.city)}</td>
+      <td>${l.maps_url?`<a href="${esc(l.maps_url)}" target="_blank">map ↗</a>`:""}</td>
+    </tr>`).join("");
+}
+function esc(s){return (s==null?"":String(s)).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
+
+// sorting
+document.querySelectorAll("th[data-k]").forEach(th=>{
+  th.onclick=()=>{const k=th.dataset.k; if(sortKey===k) sortDir*=-1; else {sortKey=k; sortDir = (k==="name"||k==="city")?1:-1;} applyFilters();};
+});
+$("filterQuality").onchange = applyFilters;
+$("searchBox").oninput = applyFilters;
+// show Apollo options only when enrichment is ticked
+(function(){const a=$("apollo");if(a){a.onchange=()=>{$("apolloOpts").style.display=a.checked?"block":"none";};}})();
+
+// run
+$("runBtn").onclick = ()=>{
+  const params = new URLSearchParams({
+    niches: $("niches").value,
+    cities: $("cities").value,
+    max_per: $("maxper").value,
+    pagespeed: $("pagespeed").checked?"1":"0",
+    hide_seen: $("hideseen").checked?"1":"0",
+    keep_good: $("keepgood").checked?"1":"0",
+    find_emails: $("findemails").checked?"1":"0",
+    min_reviews: $("minrev").value||"0",
+    max_reviews: $("maxrev").value||"0",
+  });
+  const apolloEl = $("apollo");
+  if(apolloEl && apolloEl.checked){
+    params.set("apollo","1");
+    params.set("emp_min", $("empmin").value||"0");
+    params.set("emp_max", $("empmax").value||"0");
+    params.set("rev_min", $("revmin").value||"0");
+    params.set("rev_max", $("revmax").value||"0");
+    params.set("apollo_strict", $("apollostrict").checked?"1":"0");
+  }
+  $("runBtn").disabled = true;
+  $("progress").style.display="block";
+  $("progressText").textContent="Searching businesses…";
+  $("progressBar").style.width="0%";
+  LEADS=[]; render([]);
+
+  const es = new EventSource("/api/search?"+params.toString());
+  es.onmessage = (e)=>{
+    const d = JSON.parse(e.data);
+    if(d.type==="progress"){
+      const pct = d.total? Math.round(100*d.done/d.total):0;
+      const label = d.stage==="search"?`Searching (${d.done}/${d.total}): ${d.msg}`
+                                       :`Scoring websites (${d.done}/${d.total}): ${d.msg}`;
+      $("progressText").textContent = label;
+      $("progressBar").style.width = pct+"%";
+    } else if(d.type==="done"){
+      LEADS = d.leads;
+      $("progressText").textContent = `Done · ${LEADS.length} leads found`
+        + (d.errors&&d.errors.length?` · ${d.errors.length} query error(s)`:"");
+      $("progressBar").style.width="100%";
+      applyFilters();
+      $("runBtn").disabled=false;
+      es.close();
+      setTimeout(()=>{$("progress").style.display="none";},2500);
+    } else if(d.type==="error"){
+      $("progressText").textContent = "Error: "+d.error;
+      $("runBtn").disabled=false; es.close();
+    }
+  };
+  es.onerror = ()=>{ $("runBtn").disabled=false; es.close(); };
+};
+
+// export — respects the current quality filter
+$("exportBtn").onclick = ()=>{
+  if(!LEADS.length){alert("Run a search first.");return;}
+  const fq=$("filterQuality").value;
+  let q = (fq==="hot")?"?quality=hot":(fq==="warm"||fq==="nosite")?"?quality=warm":"";
+  window.location = "/export"+q;
+};
+</script>
+</body>
+</html>
