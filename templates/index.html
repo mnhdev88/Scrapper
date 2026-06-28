@@ -54,6 +54,31 @@
   .perf-bad{color:#fca5a5;font-weight:700}
   .perf-mid{color:#fcd34d;font-weight:700}
   .perf-ok{color:#86efac;font-weight:700}
+
+  /* visible keyboard focus (a11y) */
+  a:focus-visible,button:focus-visible,select:focus-visible,input:focus-visible,
+  textarea:focus-visible,th[role="button"]:focus-visible{
+    outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
+  th[aria-sort="ascending"]::after{content:" ▲";color:var(--accent);font-size:10px}
+  th[aria-sort="descending"]::after{content:" ▼";color:var(--accent);font-size:10px}
+  .check{cursor:pointer}
+
+  /* respect reduced-motion preference */
+  @media (prefers-reduced-motion: reduce){
+    *{animation:none!important;transition:none!important;scroll-behavior:auto!important}
+  }
+
+  /* ---- mobile / tablet ---- */
+  @media (max-width:820px){
+    .wrap{grid-template-columns:1fr;min-height:auto}
+    .sidebar{border-right:none;border-bottom:1px solid var(--line)}
+    header{flex-wrap:wrap;gap:4px;padding:14px 16px}
+    .main{padding:14px 16px}
+    /* 16px inputs stop iOS Safari from auto-zooming on focus */
+    textarea,input,select{font-size:16px}
+    .toolbar #searchBox{max-width:none;flex:1 1 160px}
+    .toolbar #filterQuality{flex:1 1 160px}
+  }
 </style>
 </head>
 <body>
@@ -69,18 +94,18 @@
     <div class="warnkey">⚠ No API key found. Create a <b>.env</b> file with GOOGLE_API_KEY, then restart.</div>
     {% endif %}
 
-    <label>Niches (one per line)</label>
+    <label for="niches">Niches (one per line)</label>
     <textarea id="niches" placeholder="dentist&#10;plumber&#10;roofing contractor">dentist
 plumber
 roofing contractor</textarea>
 
-    <label>Cities (one per line)</label>
+    <label for="cities">Cities (one per line)</label>
     <textarea id="cities" placeholder="Houston TX&#10;Austin TX">Houston TX
 Austin TX</textarea>
 
     <div class="row">
       <div>
-        <label>Max per query</label>
+        <label for="maxper">Max per query</label>
         <select id="maxper">
           <option value="10">10</option>
           <option value="20">20</option>
@@ -90,10 +115,10 @@ Austin TX</textarea>
       </div>
     </div>
 
-    <label>Business size — review count (SME proxy)</label>
-    <div class="row">
-      <div><input id="minrev" type="number" min="0" value="0" placeholder="min"></div>
-      <div><input id="maxrev" type="number" min="0" value="0" placeholder="max"></div>
+    <label id="sizeLbl">Business size — review count (SME proxy)</label>
+    <div class="row" role="group" aria-labelledby="sizeLbl">
+      <div><input id="minrev" type="number" min="0" value="0" placeholder="min" aria-label="Minimum reviews"></div>
+      <div><input id="maxrev" type="number" min="0" value="0" placeholder="max" aria-label="Maximum reviews"></div>
     </div>
     <p class="stat" style="margin:6px 0 0">Filters out 1-person shops &amp; big chains. 0 = no limit.</p>
 
@@ -107,15 +132,15 @@ Austin TX</textarea>
       {% if has_apollo %}
       <label class="check"><input type="checkbox" id="apollo"> 🏢 Enrich employees &amp; revenue (Apollo)</label>
       <div id="apolloOpts" style="display:none">
-        <label>Employees (min / max)</label>
-        <div class="row">
-          <div><input id="empmin" type="number" min="0" value="10"></div>
-          <div><input id="empmax" type="number" min="0" value="20"></div>
+        <label id="empLbl">Employees (min / max)</label>
+        <div class="row" role="group" aria-labelledby="empLbl">
+          <div><input id="empmin" type="number" min="0" value="10" aria-label="Minimum employees"></div>
+          <div><input id="empmax" type="number" min="0" value="20" aria-label="Maximum employees"></div>
         </div>
-        <label>Annual revenue $M (min / max)</label>
-        <div class="row">
-          <div><input id="revmin" type="number" step="0.1" min="0" value="0.1"></div>
-          <div><input id="revmax" type="number" step="0.1" min="0" value="0.5"></div>
+        <label id="revLbl">Annual revenue $M (min / max)</label>
+        <div class="row" role="group" aria-labelledby="revLbl">
+          <div><input id="revmin" type="number" step="0.1" min="0" value="0.1" aria-label="Minimum revenue in millions"></div>
+          <div><input id="revmax" type="number" step="0.1" min="0" value="0.5" aria-label="Maximum revenue in millions"></div>
         </div>
         <label class="check"><input type="checkbox" id="apollostrict"> Strict: drop leads Apollo has no size data for</label>
       </div>
@@ -132,25 +157,26 @@ Austin TX</textarea>
 
   <!-- MAIN -->
   <div class="main">
-    <div class="progress" id="progress">
-      <div id="progressText">Starting…</div>
+    <div class="progress" id="progress" role="status">
+      <div id="progressText" aria-live="polite">Starting…</div>
       <div class="bar"><span id="progressBar"></span></div>
     </div>
 
     <div class="toolbar">
-      <select id="filterQuality" class="btn-ghost" style="padding:8px">
+      <select id="filterQuality" class="btn-ghost" style="padding:8px" aria-label="Filter leads by quality">
         <option value="">All workable (🔥 Hot + 🟠 Warm)</option>
         <option value="hot">🔥 Hot only</option>
         <option value="intent">🚧 Buying-intent signals only</option>
         <option value="fb">📘 Active on Facebook only</option>
         <option value="nosite">No website only</option>
       </select>
-      <input id="searchBox" placeholder="Filter by name / city…" style="max-width:240px">
+      <input id="searchBox" placeholder="Filter by name / city…" style="max-width:240px" aria-label="Filter by name or city">
       <span class="spacer"></span>
-      <span class="stat" id="count">No results yet</span>
+      <span class="stat" id="count" aria-live="polite">No results yet</span>
       <button class="btn-ghost" id="exportBtn">⬇ Export CSV</button>
     </div>
 
+    <div class="tablewrap" style="overflow-x:auto">
     <table id="tbl">
       <thead>
         <tr>
@@ -174,6 +200,7 @@ Austin TX</textarea>
       </thead>
       <tbody id="tbody"></tbody>
     </table>
+    </div>
     <div class="empty" id="empty">Enter niches &amp; cities, then click <b>Run Search</b>.</div>
   </div>
 </div>
@@ -243,10 +270,26 @@ function render(rows){
 }
 function esc(s){return (s==null?"":String(s)).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
 
-// sorting
+// sorting — clickable AND keyboard-accessible headers with aria-sort
+document.querySelectorAll("#tbl thead th").forEach(th=>th.setAttribute("scope","col"));
+function updateAriaSort(){
+  document.querySelectorAll("th[data-k]").forEach(th=>{
+    th.setAttribute("aria-sort",
+      th.dataset.k===sortKey ? (sortDir>0?"ascending":"descending") : "none");
+  });
+}
 document.querySelectorAll("th[data-k]").forEach(th=>{
-  th.onclick=()=>{const k=th.dataset.k; if(sortKey===k) sortDir*=-1; else {sortKey=k; sortDir = (k==="name"||k==="city")?1:-1;} applyFilters();};
+  th.tabIndex = 0;
+  th.setAttribute("role","button");
+  const doSort=()=>{
+    const k=th.dataset.k;
+    if(sortKey===k) sortDir*=-1; else {sortKey=k; sortDir=(k==="name"||k==="city")?1:-1;}
+    updateAriaSort(); applyFilters();
+  };
+  th.onclick=doSort;
+  th.onkeydown=(e)=>{ if(e.key==="Enter"||e.key===" "){e.preventDefault(); doSort();} };
 });
+updateAriaSort();
 $("filterQuality").onchange = applyFilters;
 $("searchBox").oninput = applyFilters;
 // show Apollo options only when enrichment is ticked
@@ -308,7 +351,7 @@ $("runBtn").onclick = ()=>{
 
 // export — respects the current quality filter
 $("exportBtn").onclick = ()=>{
-  if(!LEADS.length){alert("Run a search first.");return;}
+  if(!LEADS.length){ $("count").textContent="Run a search first — nothing to export yet."; return; }
   const fq=$("filterQuality").value;
   let q = (fq==="hot")?"?quality=hot":(fq==="warm"||fq==="nosite")?"?quality=warm":"";
   window.location = "/export"+q;
