@@ -172,16 +172,26 @@ def api_search():
     return Response(generate(), mimetype="text/event-stream")
 
 
-@app.route("/export")
+@app.route("/export", methods=["GET", "POST"])
 def export():
-    """Download the most recent results as CSV. Optional ?quality= filter."""
-    leads = LAST_RESULTS["leads"]
-    quality = request.args.get("quality", "")  # e.g. "hot"
+    """Download results as CSV. Optional ?quality= filter.
+
+    POST with JSON {"leads": [...]} exports exactly the rows the browser is
+    holding — this is the path the UI uses, so the download never depends on
+    server-side in-memory state (which is lost on a restart or a second
+    process/replica). GET falls back to the most recent in-memory results."""
+    if request.method == "POST":
+        body = request.get_json(silent=True) or {}
+        leads = body.get("leads") or []
+        quality = body.get("quality", "")
+    else:
+        leads = LAST_RESULTS["leads"]
+        quality = request.args.get("quality", "")  # e.g. "hot"
     if quality == "hot":
-        leads = [l for l in leads if "Hot" in l["lead_quality"]]
+        leads = [l for l in leads if "Hot" in l.get("lead_quality", "")]
     elif quality == "warm":
-        leads = [l for l in leads if "Hot" in l["lead_quality"]
-                 or "Warm" in l["lead_quality"]]
+        leads = [l for l in leads if "Hot" in l.get("lead_quality", "")
+                 or "Warm" in l.get("lead_quality", "")]
 
     buf = io.StringIO()
     writer = csv.writer(buf)

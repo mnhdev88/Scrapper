@@ -350,12 +350,34 @@ $("runBtn").onclick = ()=>{
   es.onerror = ()=>{ $("runBtn").disabled=false; es.close(); };
 };
 
-// export — respects the current quality filter
-$("exportBtn").onclick = ()=>{
+// export — respects the current quality filter.
+// POSTs the leads the browser is holding so the download never depends on
+// server-side memory (which is empty after a restart or on a 2nd process).
+$("exportBtn").onclick = async ()=>{
   if(!LEADS.length){ $("count").textContent="Run a search first — nothing to export yet."; return; }
   const fq=$("filterQuality").value;
-  let q = (fq==="hot")?"?quality=hot":(fq==="warm"||fq==="nosite")?"?quality=warm":"";
-  window.location = "/export"+q;
+  const quality = (fq==="hot")?"hot":(fq==="warm"||fq==="nosite")?"warm":"";
+  const btn=$("exportBtn"); const label=btn.textContent;
+  btn.disabled=true; btn.textContent="Preparing…";
+  try{
+    const res = await fetch("/export", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({leads: LEADS, quality})
+    });
+    if(!res.ok) throw new Error("HTTP "+res.status);
+    const blob = await res.blob();
+    const cd = res.headers.get("Content-Disposition")||"";
+    const m = cd.match(/filename="?([^"]+)"?/);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href=url; a.download = m? m[1] : "leads.csv";
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  }catch(err){
+    $("count").textContent="Export failed: "+err.message;
+  }finally{
+    btn.disabled=false; btn.textContent=label;
+  }
 };
 </script>
 </body>
