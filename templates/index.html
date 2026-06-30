@@ -127,10 +127,10 @@ Austin TX</textarea>
     <label class="check"><input type="checkbox" id="findemails" checked> Find contact emails from websites</label>
     <label class="check"><input type="checkbox" id="keepgood"> Also keep 🟢 Good websites (normally skipped)</label>
 
-    <!-- Apollo enrichment -->
+    <!-- Firmographic enrichment (Vibe/Explorium or Apollo) -->
     <div style="border-top:1px solid var(--line);margin-top:16px;padding-top:12px">
-      {% if has_apollo %}
-      <label class="check"><input type="checkbox" id="apollo"> 🏢 Enrich employees &amp; revenue (Apollo)</label>
+      {% if has_enrich %}
+      <label class="check"><input type="checkbox" id="apollo"> 🏢 Enrich employees &amp; revenue ({{ enrich_provider }})</label>
       <div id="apolloOpts" style="display:none">
         <label id="empLbl">Employees (min / max)</label>
         <div class="row" role="group" aria-labelledby="empLbl">
@@ -142,11 +142,12 @@ Austin TX</textarea>
           <div><input id="revmin" type="number" step="0.1" min="0" value="0.1" aria-label="Minimum revenue in millions"></div>
           <div><input id="revmax" type="number" step="0.1" min="0" value="0.5" aria-label="Maximum revenue in millions"></div>
         </div>
-        <label class="check"><input type="checkbox" id="apollostrict"> Strict: drop leads Apollo has no size data for</label>
+        <label class="check"><input type="checkbox" id="apollostrict"> Strict: drop leads with no size data</label>
+        <p class="stat" style="margin:6px 0 0">Costs ~1 credit per enriched website. Matches by domain (no-website leads kept unless Strict).</p>
       </div>
       {% else %}
-      <p class="stat">🏢 <b>Apollo enrichment</b> (employees/revenue) is off.
-         Add <code>APOLLO_API_KEY</code> to your <b>.env</b> and restart to enable it.</p>
+      <p class="stat">🏢 <b>Firmographic enrichment</b> (employees/revenue) is off.
+         Add <code>EXPLORIUM_API_KEY</code> (or <code>APOLLO_API_KEY</code>) to your <b>.env</b> and restart to enable it.</p>
       {% endif %}
     </div>
 

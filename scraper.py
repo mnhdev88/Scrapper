@@ -16,6 +16,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 PLACES_URL = "https://places.googleapis.com/v1/places:searchText"
 PSI_URL = "https://www.googleapis.com/pagespeedonline/v5/runPagespeed"
 APOLLO_ENRICH_URL = "https://api.apollo.io/api/v1/organizations/enrich"
+VIBE_MATCH_URL = "https://api.explorium.ai/v1/businesses/match"
+VIBE_ENRICH_URL = "https://api.explorium.ai/v1/businesses/firmographics/enrich"
 
 # Only request the fields we actually use -> keeps Places API cost down.
 PLACES_FIELD_MASK = ",".join([
@@ -108,6 +110,7 @@ def normalize_place(raw, niche, city):
         "revenue": "",
         "revenue_str": "",
         "industry": "",
+        "locations": "",
         # filled in later by scoring:
         "perf": None,
         "seo": None,
@@ -164,7 +167,8 @@ def score_website(url, api_key):
 
 
 # --------------------------------------------------------------------------
-# 2a. APOLLO ENRICHMENT (optional — real employee count + revenue by domain)
+# 2a. FIRMOGRAPHIC ENRICHMENT (employees + revenue by domain)
+#     Two providers: Apollo (exact numbers) and Vibe/Explorium (ranges).
 # --------------------------------------------------------------------------
 def _domain_of(url):
     if not url:
@@ -173,10 +177,44 @@ def _domain_of(url):
     return net.replace("www.", "").strip().lower()
 
 
+def _parse_num(tok):
+    """'500K' -> 500000, '1M' -> 1_000_000, '5' -> 5. Returns float or None."""
+    if tok is None:
+        return None
+    t = str(tok).strip().upper().replace("$", "").replace(",", "").replace("+", "")
+    if not t:
+        return None
+    mult = 1.0
+    if t.endswith("K"):
+        mult, t = 1e3, t[:-1]
+    elif t.endswith("M"):
+        mult, t = 1e6, t[:-1]
+    elif t.endswith("B"):
+        mult, t = 1e9, t[:-1]
+    try:
+        return float(t) * mult
+    except ValueError:
+        return None
+
+
+def parse_range(s):
+    """Turn a range string into (low, high) numbers.
+    '11-50' -> (11,50) · '1M-5M' -> (1e6,5e6) · '10001+' -> (10001,None)."""
+    if s is None or s == "":
+        return (None, None)
+    s = str(s).strip()
+    if s.endswith("+"):
+        return (_parse_num(s[:-1]), None)
+    if "-" in s:
+        a, _, b = s.partition("-")
+        return (_parse_num(a), _parse_num(b))
+    n = _parse_num(s)
+    return (n, n)
+
+
 def apollo_enrich(domain, apollo_key):
-    """Look up a company's firmographics by domain. Returns
-    {employees, revenue, revenue_str, industry} or {} when unavailable.
-    Needs a paid Apollo plan with API access."""
+    """Apollo firmographics by domain. Needs a paid Apollo plan with API access.
+    Returns {employees, revenue_str, industry, emp_low/high, rev_low/high}."""
     if not domain or not apollo_key:
         return {}
     try:
@@ -195,11 +233,58 @@ def apollo_enrich(domain, apollo_key):
         return {}
     if not org:
         return {}
+    emp = org.get("estimated_num_employees")
+    rev = org.get("annual_revenue")
+    emp_n = emp if isinstance(emp, (int, float)) else None
+    rev_n = rev if isinstance(rev, (int, float)) else None
     return {
-        "employees": org.get("estimated_num_employees"),
-        "revenue": org.get("annual_revenue"),
+        "employees": emp if emp else "",
         "revenue_str": org.get("annual_revenue_printed", "") or "",
         "industry": org.get("industry", "") or "",
+        "emp_low": emp_n, "emp_high": emp_n,
+        "rev_low": rev_n, "rev_high": rev_n,
+    }
+
+
+def vibe_enrich(name, domain, vibe_key):
+    """Vibe/Explorium firmographics by name+domain. Matches the business, then
+    pulls firmographics. Returns employee/revenue RANGES (e.g. '11-50','1M-5M').
+    Costs ~1 Explorium credit per enriched business."""
+    if not vibe_key or (not name and not domain):
+        return {}
+    headers = {"api_key": vibe_key, "Content-Type": "application/json"}
+    try:
+        m = requests.post(VIBE_MATCH_URL, headers=headers, timeout=20, json={
+            "businesses_to_match": [{"name": name or None, "domain": domain or None}]})
+        if m.status_code != 200:
+            return {}
+        matched = m.json().get("matched_businesses", [])
+        bid = matched[0].get("business_id") if matched else None
+        if not bid:
+            return {}
+        r = requests.post(VIBE_ENRICH_URL, headers=headers, timeout=30,
+                          json={"business_id": bid})
+        if r.status_code != 200:
+            return {}
+        d = r.json().get("data") or {}
+    except (requests.RequestException, ValueError):
+        return {}
+    if not d:
+        return {}
+    emp = d.get("number_of_employees_range") or ""
+    rev = d.get("yearly_revenue_range") or ""
+    el, eh = parse_range(emp)
+    rl, rh = parse_range(rev)
+    locs = sum(x.get("locations", 0) for x in (d.get("locations_distribution") or []))
+    industry = (d.get("linkedin_industry_category")
+                or d.get("naics_description") or "")
+    return {
+        "employees": emp,
+        "revenue_str": rev,
+        "industry": industry,
+        "locations": locs or "",
+        "emp_low": el, "emp_high": eh,
+        "rev_low": rl, "rev_high": rh,
     }
 
 
@@ -458,7 +543,7 @@ def run_search(niches, cities, api_key, max_per_query=60,
                run_pagespeed=True, seen_ids=None, progress=None,
                keep_good=False, find_emails=True,
                min_reviews=0, max_reviews=0,
-               apollo_key=None, emp_min=0, emp_max=0,
+               apollo_key=None, vibe_key=None, emp_min=0, emp_max=0,
                rev_min=0, rev_max=0, apollo_strict=False):
     """Loop niches x cities, collect + score + classify leads.
 
@@ -467,9 +552,10 @@ def run_search(niches, cities, api_key, max_per_query=60,
     🔥 Hot + 🟠 Warm leads remain — the businesses actually worth working.
     `find_emails=True` scrapes each website for contact emails (free).
     `min_reviews`/`max_reviews` filter by review count (size proxy; 0 = no limit).
-    `apollo_key` enables firmographic enrichment; `emp_*`/`rev_*` set the target
-    employee/revenue ranges. `apollo_strict=False` keeps leads Apollo has no
-    data for (e.g. no-website shops) instead of dropping them.
+    `vibe_key` (Explorium) or `apollo_key` enables firmographic enrichment;
+    `emp_*`/`rev_*` set the target employee/revenue ranges (range-overlap match).
+    `apollo_strict=False` keeps leads the provider has no data for (e.g.
+    no-website shops) instead of dropping them. Vibe is used when both keys set.
     Returns (leads, errors)."""
     seen_ids = seen_ids or set()
     errors = []
@@ -527,8 +613,12 @@ def run_search(niches, cities, api_key, max_per_query=60,
             if run_pagespeed:
                 out["psi"] = score_website(lead["website"], api_key)
             out["site"] = analyze_website(lead["website"])
-            if apollo_key:
-                out["apollo"] = apollo_enrich(_domain_of(lead["website"]), apollo_key)
+            # Firmographics: prefer Vibe/Explorium, fall back to Apollo.
+            if vibe_key:
+                out["enrich"] = vibe_enrich(
+                    lead["name"], _domain_of(lead["website"]), vibe_key)
+            elif apollo_key:
+                out["enrich"] = apollo_enrich(_domain_of(lead["website"]), apollo_key)
             return out
 
         with ThreadPoolExecutor(max_workers=8) as pool:
@@ -555,12 +645,15 @@ def run_search(niches, cities, api_key, max_per_query=60,
                     ems = site.get("emails", [])
                     lead["email"] = ems[0] if ems else ""
                     lead["emails"] = ", ".join(ems)
-                apo = out.get("apollo") or {}
-                if apo:
-                    lead["employees"] = apo.get("employees") or ""
-                    lead["revenue"] = apo.get("revenue") or ""
-                    lead["revenue_str"] = apo.get("revenue_str") or ""
-                    lead["industry"] = apo.get("industry") or ""
+                enr = out.get("enrich") or {}
+                if enr:
+                    lead["employees"] = enr.get("employees") or ""
+                    lead["revenue_str"] = enr.get("revenue_str") or ""
+                    lead["industry"] = enr.get("industry") or ""
+                    lead["locations"] = enr.get("locations") or ""
+                    # numeric bounds for range-overlap size filtering
+                    for k in ("emp_low", "emp_high", "rev_low", "rev_high"):
+                        lead[k] = enr.get(k)
                 done += 1
                 emit("score", done, total, lead["name"])
 
@@ -573,27 +666,33 @@ def run_search(niches, cities, api_key, max_per_query=60,
     if not keep_good:
         leads = [l for l in leads if "Good" not in l["lead_quality"]]
 
-    # Apollo size filter (only when enrichment ran AND a range is set).
-    # Soft by default: leads with NO Apollo data are kept (they're often the
-    # best — no-website shops Apollo doesn't track). Strict drops them.
-    if apollo_key and (emp_min or emp_max or rev_min or rev_max):
-        def size_ok(l):
-            emp = l.get("employees")
-            rev = l.get("revenue")
-            has_data = isinstance(emp, (int, float)) or isinstance(rev, (int, float))
-            if not has_data:
-                return not apollo_strict
-            if isinstance(emp, (int, float)):
-                if emp_min and emp < emp_min:
-                    return False
-                if emp_max and emp > emp_max:
-                    return False
-            if isinstance(rev, (int, float)):
-                if rev_min and rev < rev_min:
-                    return False
-                if rev_max and rev > rev_max:
-                    return False
+    # Size filter (only when enrichment ran AND a range is set).
+    # Works for both providers via range-overlap: a lead passes if its
+    # employee/revenue band overlaps the target band. Soft by default:
+    # leads the provider has no data for are kept (often the best — no-website
+    # shops). Strict drops them.
+    if (vibe_key or apollo_key) and (emp_min or emp_max or rev_min or rev_max):
+        def overlaps(lo, hi, tmin, tmax):
+            """True if [lo,hi] overlaps the target [tmin,tmax] (0/None=open)."""
+            if lo is None and hi is None:
+                return None  # no data for this metric
+            lo = lo if lo is not None else hi
+            hi = hi if hi is not None else lo
+            if tmax and lo > tmax:
+                return False
+            if tmin and hi < tmin:
+                return False
             return True
+
+        def size_ok(l):
+            emp = overlaps(l.get("emp_low"), l.get("emp_high"), emp_min, emp_max) \
+                if (emp_min or emp_max) else None
+            rev = overlaps(l.get("rev_low"), l.get("rev_high"), rev_min, rev_max) \
+                if (rev_min or rev_max) else None
+            if emp is None and rev is None:
+                return not apollo_strict  # no usable data
+            # must satisfy every metric that has both a target and data
+            return emp is not False and rev is not False
         leads = [l for l in leads if size_ok(l)]
 
     leads.sort(key=lambda x: x["lead_score"], reverse=True)

@@ -21,6 +21,10 @@ import scraper
 load_dotenv()
 API_KEY = os.getenv("GOOGLE_API_KEY", "").strip()
 APOLLO_KEY = os.getenv("APOLLO_API_KEY", "").strip()
+VIBE_KEY = (os.getenv("EXPLORIUM_API_KEY", "").strip()
+            or os.getenv("VIBE_API_KEY", "").strip())
+# Which firmographic provider is active (Vibe preferred).
+ENRICH_PROVIDER = "Vibe / Explorium" if VIBE_KEY else ("Apollo" if APOLLO_KEY else "")
 
 # DATA_DIR can be overridden (e.g. point it at a Railway persistent volume
 # so data/seen.json survives restarts and redeploys).
@@ -69,9 +73,10 @@ CSV_COLUMNS = [
     ("facebook", "Facebook"),
     ("instagram", "Instagram"),
     ("flags", "Issues"),
-    ("employees", "Employees (Apollo)"),
-    ("revenue_str", "Revenue (Apollo)"),
-    ("industry", "Industry (Apollo)"),
+    ("employees", "Employees"),
+    ("revenue_str", "Revenue"),
+    ("industry", "Industry"),
+    ("locations", "Locations"),
     ("rating", "Google Rating"),
     ("reviews", "Reviews"),
     ("niche", "Niche"),
@@ -84,7 +89,8 @@ CSV_COLUMNS = [
 @app.route("/")
 def index():
     return render_template("index.html", has_key=bool(API_KEY),
-                           has_apollo=bool(APOLLO_KEY))
+                           has_enrich=bool(VIBE_KEY or APOLLO_KEY),
+                           enrich_provider=ENRICH_PROVIDER)
 
 
 @app.route("/api/search")
@@ -109,7 +115,7 @@ def api_search():
 
     min_reviews = _int("min_reviews")
     max_reviews = _int("max_reviews")
-    use_apollo = request.args.get("apollo", "0") == "1" and bool(APOLLO_KEY)
+    use_enrich = request.args.get("apollo", "0") == "1" and bool(VIBE_KEY or APOLLO_KEY)
     emp_min = _int("emp_min")
     emp_max = _int("emp_max")
     # revenue inputs arrive in $millions; convert to dollars.
@@ -135,7 +141,8 @@ def api_search():
                 seen_ids=seen_ids, progress=progress, keep_good=keep_good,
                 find_emails=find_emails,
                 min_reviews=min_reviews, max_reviews=max_reviews,
-                apollo_key=APOLLO_KEY if use_apollo else None,
+                vibe_key=VIBE_KEY if (use_enrich and VIBE_KEY) else None,
+                apollo_key=APOLLO_KEY if (use_enrich and APOLLO_KEY) else None,
                 emp_min=emp_min, emp_max=emp_max,
                 rev_min=rev_min, rev_max=rev_max, apollo_strict=apollo_strict,
             )
